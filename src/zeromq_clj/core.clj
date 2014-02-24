@@ -25,14 +25,17 @@
   (ZMQ/context 1))
 
 (defn create-sub-socket
+  "Creates a zmq 'SUB' socket, connects it to the given address, sets a timeout of 0 to make it
+  non-blocking, and subscribes to the given topic."
   [context address topic]
   (io!
    (doto (.socket context ZMQ/SUB)
      (.connect address)
-     (.setReceiveTimeOut 0) ;; Return straight away with nil if nothing
+     (.setReceiveTimeOut 0)
      (.subscribe (.getBytes topic)))))
 
 (defn create-pub-socket
+  "Creates a zmq 'PUB' socket and binds to the given address."
   [context address]
   (io!
    (let [socket (.socket context ZMQ/PUB)]
@@ -41,13 +44,15 @@
        (throw (Exception. "Could not create publish socket."))))))
 
 (defn publish
+  "Publishes an event on a given payload."
   [socket payload topic]
   (io!
    (.sendMore socket (.getBytes topic))
    (.send socket (serialize payload))))
 
 (defn receive
-  "Assumes two separate message parts - topic and then payload."
+  "Receives a message from a socket and deserializes it. Assumes two separate message parts - topic
+  and then payload."
   [socket]
   (io!
    (let [topic (.recv socket)]
@@ -79,11 +84,14 @@
     (onEvent [this ev sequence eob?]
       (func (.getMessage ev)))))
 
-(defn- create-message-puller-and-publisher
-  "Pulls messages from the given socket, and publishes them into the given ring-buffer in the envelope."
-  [socket ring-buffer]
+(defn- not-interrupted
+  []
+  (not (.isInterrupted (Thread/currentThread))))
+
+(defn- create-polling-function
+  [socket ring-buffer] ;; TODO Maybe use a ZMQ poller here instead, can't see the benefits of doing so though.
   (fn []
-    (while true
+    (while (not-interrupted)
       (try
         (let [next-msg (receive socket)]
           (when next-msg
@@ -96,10 +104,16 @@
 
 (defn on-msg
   "Spins up an lmax Disruptor to continuously pull messages off the provided socket and
-  execute the given function on those messages."
+  execute the given function on those messages. Returns the Disruptor that was created as a result.
+
+  To stop the listening processes, you need to:
+  (.shutdown disruptor) ;; to kill the thread running the provided 'func' on incoming messages.
+  (.shutdownNow ex) ;; to kill the thread that is polling the socket for messages.
+
+  This is in addition to calling (.close) on any open contexts and sockets."
   [socket func executor]
   (let [disruptor (doto (Disruptor. (create-event-factory) 65536 executor)
                     (.handleEventsWith (into-array EventHandler [(create-event-handler func)])))
         ring-buffer (.start disruptor)]
-    (.execute executor (create-message-puller-and-publisher socket ring-buffer))
+    (.execute executor (create-polling-function socket ring-buffer))
     disruptor))
