@@ -11,7 +11,7 @@ Current Known limitations:
 
 ## Usage
 
-See 'example.clj'
+See 'examples' folder.
 
 ## License
 
