@@ -31,7 +31,7 @@
   (io!
    (doto (.socket context ZMQ/SUB)
      (.connect address)
-     (.setReceiveTimeOut 0)
+     (.setReceiveTimeOut 200) ;; Need to remain responsive to interrupts but not busy spin unnecessarily
      (.subscribe (.getBytes topic)))))
 
 (defn create-pub-socket
@@ -60,6 +60,12 @@
        (when (not (.hasReceiveMore socket))
          (throw (Exception. "No data received beyond topic header.")))
        (deserialize (.recv socket))))))
+
+;; --------------------------------------------------------------------------------------------------------
+;; Disruptor-related stuff
+
+;; TODO: do we really need disruptor? Can we not just use core.async or quasar/pulsar channels? This
+;; could really reduce the amount of code here.
 
 (defprotocol ^:private IMessageEnvelope
   (setMessage [this msg])
@@ -101,6 +107,9 @@
               (.publish ring-buffer next-seq))))
         (catch Exception e
           (println "Caught exception in message pulling loop:" e))))))
+
+;; END Disruptor-related stuff
+;; --------------------------------------------------------------------------------------------------------
 
 (defn on-msg
   "Spins up an lmax Disruptor to continuously pull messages off the provided socket and
