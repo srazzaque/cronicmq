@@ -4,6 +4,9 @@
            (com.lmax.disruptor.dsl Disruptor)
            (java.io ByteArrayOutputStream ObjectOutputStream ObjectInputStream ByteArrayInputStream)))
 
+(def ^:dynamic *polling-error-handler* (fn [e]
+                                         (println "Caught exception in message pulling loop:" e)))
+
 ;; Credit: http://stackoverflow.com/questions/7701634/efficient-binary-serialization-for-clojure-java
 (defn- serialize
   "Given a java.io.Serializable thing, serialize it to a byte array."
@@ -65,13 +68,14 @@
 ;; Disruptor-related stuff
 
 ;; TODO: do we really need disruptor? Can we not just use core.async or quasar/pulsar channels? This
-;; could really reduce the amount of code here.
+;; could really simplify both the code here and the cleanup code for clients.
 
 (defprotocol ^:private IMessageEnvelope
   (setMessage [this msg])
   (getMessage [this]))
 
-(deftype ^:private MessageEnvelope [^:volatile-mutable data]
+(deftype ^:private MessageEnvelope
+  [^:volatile-mutable data]
   IMessageEnvelope
   (setMessage [this msg]
     (set! data msg))
@@ -106,7 +110,7 @@
               (.setMessage next-event next-msg)
               (.publish ring-buffer next-seq))))
         (catch Exception e
-          (println "Caught exception in message pulling loop:" e))))))
+          (*polling-error-handler* e))))))
 
 ;; END Disruptor-related stuff
 ;; --------------------------------------------------------------------------------------------------------
@@ -119,7 +123,10 @@
   (.shutdown disruptor) ;; to kill the thread running the provided 'func' on incoming messages.
   (.shutdownNow ex) ;; to kill the thread that is polling the socket for messages.
 
-  This is in addition to calling (.close) on any open contexts and sockets."
+  This is in addition to calling (.close) on any open contexts and sockets.
+
+  To specify custom behaviour for exceptions thrown during polling handling, rebind
+  *polling-error-handler* to a function accepting a single parameter - the thrown exception."
   [socket func executor]
   (let [disruptor (doto (Disruptor. (create-event-factory) 65536 executor)
                     (.handleEventsWith (into-array EventHandler [(create-event-handler func)])))
