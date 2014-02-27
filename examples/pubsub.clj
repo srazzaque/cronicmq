@@ -16,7 +16,7 @@
   (dotimes [n 1000]
     (zmq/publish pub {:event n :message "Hello there!"} "myTopic"))
   (finally
-    (.shutdown disruptor)
     (.shutdownNow ex)
+    (.shutdown disruptor)
     (doseq [i [pub sub ctx]]
       (.close i))))
