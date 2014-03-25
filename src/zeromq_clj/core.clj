@@ -1,6 +1,6 @@
 (ns zeromq-clj.core
   (:import (org.zeromq ZMQ)
-           (com.lmax.disruptor EventHandler EventFactory)
+           (com.lmax.disruptor EventHandler EventFactory ExceptionHandler)
            (com.lmax.disruptor.dsl Disruptor)
            (java.io ByteArrayOutputStream ObjectOutputStream ObjectInputStream ByteArrayInputStream)))
 
@@ -34,7 +34,7 @@
   (io!
    (doto (.socket context ZMQ/SUB)
      (.connect address)
-     (.setReceiveTimeOut 200) ;; Need to remain responsive to interrupts but not busy spin unnecessarily
+     (.setReceiveTimeOut 500) ;; Need to remain responsive to interrupts but not busy spin unnecessarily
      (.subscribe (.getBytes topic)))))
 
 (defn create-pub-socket
@@ -94,6 +94,16 @@
     (onEvent [this ev sequence eob?]
       (func (.getMessage ev)))))
 
+(defn- create-exception-handler
+  [f]
+  (reify ExceptionHandler
+    (handleEventException [_ exc n evt]
+      (f exc))
+    (handleOnStartException [_ exc]
+      (f exc))
+    (handleOnShutdownException [_ exc]
+      (f exc))))
+
 (defn- not-interrupted
   []
   (not (.isInterrupted (Thread/currentThread))))
@@ -110,7 +120,8 @@
               (.setMessage next-event next-msg)
               (.publish ring-buffer next-seq))))
         (catch Exception e
-          (*polling-error-handler* e))))))
+          (*polling-error-handler* e))))
+    (.interrupt Thread/currentThread)))
 
 ;; END Disruptor-related stuff
 ;; --------------------------------------------------------------------------------------------------------
@@ -125,10 +136,11 @@
 
   This is in addition to calling (.close) on any open contexts and sockets.
 
-  To specify custom behaviour for exceptions thrown during polling handling, rebind
-  *polling-error-handler* to a function accepting a single parameter - the thrown exception."
-  [socket func executor]
+  To specify custom behaviour for exceptions, pass in an exception-handler.
+  to a function accepting a single parameter - the thrown exception."
+  [socket func executor & exception-handler]
   (let [disruptor (doto (Disruptor. (create-event-factory) 65536 executor)
+                    (.handleExceptionsWith (create-exception-handler (or exception-handler println)))
                     (.handleEventsWith (into-array EventHandler [(create-event-handler func)])))
         ring-buffer (.start disruptor)]
     (.execute executor (create-polling-function socket ring-buffer))
