@@ -2,6 +2,6 @@
   (:require [clojure.test :refer :all]
             [zeromq-clj.core :refer :all]))
 
-(deftest a-test
-  (testing "FIXME, I fail."
-    (is (= 0 1))))
+(comment (deftest a-test
+           (testing "FIXME, I fail."
+             (is (= 0 1)))))

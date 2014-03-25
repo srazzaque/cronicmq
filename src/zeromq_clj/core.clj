@@ -121,7 +121,7 @@
               (.publish ring-buffer next-seq))))
         (catch Exception e
           (*polling-error-handler* e))))
-    (.interrupt Thread/currentThread)))
+    (.interrupt (Thread/currentThread))))
 
 ;; END Disruptor-related stuff
 ;; --------------------------------------------------------------------------------------------------------
