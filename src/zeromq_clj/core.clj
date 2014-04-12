@@ -1,4 +1,5 @@
 (ns zeromq-clj.core
+  (:require [clojure.tools.logging :refer :all])
   (:import (org.zeromq ZMQ)
            (com.lmax.disruptor EventHandler EventFactory ExceptionHandler)
            (com.lmax.disruptor.dsl Disruptor)
@@ -23,31 +24,57 @@
   (with-open [dis (ObjectInputStream. (ByteArrayInputStream. bytes))]
     (.readObject dis)))
 
+(defprotocol IContext
+  (close
+    [ctx]
+    "Closes any sockets associated with this context and then closes
+    the context itself.")
+  (add-socket
+    [ctx socket]
+    "Adds a socket to this context for tracking purposes. This should
+    only be called internally.")
+  (pub-socket
+    [ctx address]
+    "Creates a publishing socket from the given context and adds it to
+    the list of sockets to close when the context is closed.")
+  (sub-socket
+    [ctx address topic]
+    "Creats a subscription socket from the given context and adds it
+    to the list of sockets to close when the context is closed."))
+
 (defn create-context
+  "Creates a ZMQ context.
+   Must call (close context) on the created context when you no longer need it, which will close all open sockets on it.
+   One would usually wrap that in a finally block on the program's main loop/entry point."
   []
-  (ZMQ/context 1))
-
-(defn create-sub-socket
-  "Creates a zmq 'SUB' socket, connects it to the given address, sets a timeout of 0 to make it
-  non-blocking, and subscribes to the given topic."
-  [context address topic]
-  (io!
-   (doto (.socket context ZMQ/SUB)
-     (.connect address)
-     (.setReceiveTimeOut 500) ;; Need to remain responsive to interrupts but not busy spin unnecessarily
-     (.subscribe (.getBytes topic)))))
-
-(defn create-pub-socket
-  "Creates a zmq 'PUB' socket and binds to the given address."
-  [context address]
-  (io!
-   (let [socket (.socket context ZMQ/PUB)]
-     (if (> (.bind socket address) 0)
-       socket
-       (throw (Exception. "Could not create publish socket."))))))
+  (let [ctx (ZMQ/context 1)
+        sockets (atom [])]
+    (reify IContext
+      (close [_]
+        (doseq [i @sockets]
+          (.close i))
+        (.close ctx))
+      (add-socket [_ sck]
+        (swap! sockets conj sck)
+        sck)
+      (pub-socket [this address]
+        (debug "Opening publishing socket on: " address)
+        (io!
+         (let [socket (.socket ctx ZMQ/PUB)]
+           (if (> (.bind socket address) 0)
+             (add-socket this socket)
+             (throw (Exception. "Could not create publish socket."))))))
+      (sub-socket [this address topic]
+        (debug "Opening subscription socket on: " address " topic: " topic)
+        (io!
+         (let [sck (doto (.socket ctx ZMQ/SUB)
+                 (.connect address)
+                 (.setReceiveTimeOut 500) ;; Need to remain responsive to interrupts but not busy spin unnecessarily
+                 (.subscribe (.getBytes topic)))]
+           (add-socket this sck)))))))
 
 (defn publish
-  "Publishes an event on a given payload."
+  "Publishes the payload on the socket using the given topic."
   [socket payload topic]
   (io!
    (.sendMore socket (.getBytes topic))
@@ -55,7 +82,7 @@
 
 (defn receive
   "Receives a message from a socket and deserializes it. Assumes two separate message parts - topic
-  and then payload."
+  and then a payload."
   [socket]
   (io!
    (let [topic (.recv socket)]
@@ -145,3 +172,4 @@
         ring-buffer (.start disruptor)]
     (.execute executor (create-polling-function socket ring-buffer))
     disruptor))
+
