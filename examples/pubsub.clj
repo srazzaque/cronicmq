@@ -2,8 +2,8 @@
 
 (do 
   (def ctx (zmq/create-context))
-  (def sub (zmq/create-sub-socket ctx "tcp://127.0.0.1:5858" "myTopic"))
-  (def pub (zmq/create-pub-socket ctx "tcp://127.0.0.1:5858"))
+  (def sub (zmq/sub-socket ctx "tcp://127.0.0.1:5858" "myTopic"))
+  (def pub (zmq/pub-socket ctx "tcp://127.0.0.1:5858"))
   (def ex (java.util.concurrent.Executors/newFixedThreadPool 5))
   (def received-messages (atom [])))
 
@@ -18,5 +18,4 @@
   (finally
     (.shutdownNow ex)
     (.shutdown disruptor)
-    (doseq [i [pub sub ctx]]
-      (.close i))))
+    (zmq/close ctx)))
