@@ -6,4 +6,4 @@
   :dependencies [[org.clojure/clojure "1.5.1"]
                  [org.zeromq/jeromq "0.3.2"]
                  [org.clojure/tools.logging "0.2.3"]
-                 [com.lmax/disruptor "3.0.1"]])
+                 [org.clojure/core.async "0.1.278.0-76b25b-alpha"]])
