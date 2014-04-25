@@ -7,7 +7,10 @@
         catcher-name (symbol (str "mock-" prefix "-catcher"))]
     `(do
        (def ~catcher-name (atom []))
-       (defn ~function-name [& args] (reset! ~catcher-name args)))))
+       (defn ~function-name
+         [& args]
+         (reset! ~catcher-name args)
+         (str "mock-" ~prefix)))))
 
 (doseq [mock '(context create-socket send send-more)]
   (create-mock-function-and-catcher mock))
@@ -47,5 +50,12 @@
     (is (= 0 1))))
 
 (deftest cleaning-up
-  (testing "calling close on the context should close all open sockets"
-    (is (= 0 1))))
+  (testing "calling close on the context should close all the sockets associated with it."
+    (let [closed-items  (atom [])]
+      (with-redefs-fn {#'zmq/close #(swap! closed-items conj %)
+                       #'zmq/context mock-context}
+        (let [ctx (create-context)]
+          (create-publisher ctx "publish-addr")
+          (create-subscription ctx "sub-addr")
+          (close ctx)
+          (is (= ["mock-context" "publish-addr" "sub-addr"] @closed-items)))))))
