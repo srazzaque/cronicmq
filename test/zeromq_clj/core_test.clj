@@ -78,44 +78,50 @@
 (deftest test-subscription
 
   (testing "create topic subscription with implicit context."
-    (with-redefs-fn {#'zmq/context! (constantly "implicit-context")
-                     #'zmq/socket! (mock-fn socket-args)
+    (with-redefs-fn {#'zmq/context! (constantly "the-context")
+                     #'zmq/sub-socket! (mock-fn socket-args)
                      #'zmq/subscribe! (mock-fn subscribe-args)}
-      #((is (subscription "tcp://foo.bar:1234/topicName"))
-        (is (= ["implicit-context" "tcp://foo.bar:1234"] @socket-args))
+      (fn []
+        (is (subscription "tcp://foo.bar:1234/topicName"))
+        (is (= ["the-context" "tcp://foo.bar:1234"] @socket-args))
         (is (= ["mock-subscription" "topicName"]) @subscribe-args))))
   
   (testing "create all-topic subscription."
-    (with-redefs-fn {#'zmq/context! (constantly "implicit-context")
-                     #'zmq/socket! (mock-fn socket-args)
+    (with-redefs-fn {#'zmq/context! (constantly "the-context")
+                     #'zmq/sub-socket! (mock-fn socket-args)
                      #'zmq/subscribe! (mock-fn subscribe-args)}
-      #((is (subscription "tcp://foo.bar:1234/*"))
-        (is (= ["implicit-context" "tcp://foo.bar:1234"] @socket-args))
-        (is (= ["mock-subscription" ""]) @subscribe-args))))
+      (fn []
+        (is (subscription "tcp://foo.bar:1234/*"))
+        (is (= ["the-context" "tcp://foo.bar:1234"] @socket-args))
+        (is (= ["mock-subscription" ""]) @subscribe-args)))))
+
+(deftest test-onmsg
 
   (testing "on-msg should perform the function it was provided with."
     (let [mock-message (promise)
           action-performed (atom false)]
       (with-redefs-fn {#'zmq/recv! (fn [_] @mock-message)}
-        #((is (on-msg "mock-subsocket"
-                      :do (fn [_] reset! action-performed true)
+        (fn []
+          (is (on-msg "mock-subsocket"
+                      :do (fn [msg] reset! action-performed msg)
                       :while (constantly true)))
           (deliver mock-message "foobar")
-          (is (= "foobar" @action-performed))))))
+          (is "foobar" @action-performed)))))
 
   (testing "on-msg should continue pulling messages from the socket"
-    (let [channel (async/chan)
+    (let [channel (async/timeout 500)
           processed-messages (atom 0)]
       (with-redefs-fn {#'zmq/recv! (async/<!! channel)}
-        #((is (on-msg "mock-subsocket"
+        (fn [] 
+          (is (on-msg "mock-subsocket"
                       :do (fn [_] (swap! processed-messages inc))
-                      :until (constantly true)))
+                      :while (constantly true)))
           (doseq [n (range 1 100)]
             (async/>!! channel "x")
             (is (= n @processed-messages)))))))
 
   (testing "on-msg should stop performing the function provided if the :while condition returns false."
-    (let [channel (async/chan)
+    (let [channel (async/timeout 500)
           processed-messages (atom 0)
           process? (atom true)]
       (with-redefs-fn {#'zmq/recv! (async/<!! channel)}
@@ -123,13 +129,13 @@
           []
           (is (on-msg "mock-subsocket"
                       :do (fn [_] (swap! processed-messages inc))
-                      :until #(@process?)))
+                      :while (fn [] @process?)))
           (async/>!! channel "x")
           (is (= 1 @processed-messages))
           (reset! process? false)
           (doseq [n (range 1 100)]
-            (async/>!! channel "x")
-            (is (= 1 @processed-messages))))))))
+            (async/>!! channel "x"))
+          (is (= 1 @processed-messages)))))))
 
 (deftest implicit-context
 
@@ -138,8 +144,10 @@
   (testing "implicit context should only ever be created once"
     (let [call-count (atom 0)]
       (with-redefs-fn {#'zmq/context! (fn [& _] (swap! call-count inc))
-                       #'zmq/socket! (mock-fn socket-args)}
-        #((subscription "tcp://foo-bar-baz:1412/x")
+                       #'zmq/sub-socket! (mock-fn socket-args)
+                       #'zmq/pub-socket! (mock-fn socket-args)}
+        (fn [] 
+          (subscription "tcp://foo-bar-baz:1412/x")
           (subscription "tcp://foo-bar-baz:1413/x")
           (publisher "tcp://foo-bar-baz:1413/x")
           (publisher "tcp://foo-bar-baz:1413/")

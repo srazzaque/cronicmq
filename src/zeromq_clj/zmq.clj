@@ -4,7 +4,7 @@
 
 (def pub-socket! nil)
 
-(def socket! nil)
+(def sub-socket! nil)
 
 (def context! nil)
 

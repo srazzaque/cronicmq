@@ -11,12 +11,15 @@
       (reset! ctx (zmq/context!))))
 
 ;; TODO make it better and work for other protocols
-(def ^:private url-re #"^(tcp)://([^/]+)/(.*)$")
+(def ^:private url-re #"^(tcp)://([^/]+)(/(.*))?$")
 
-(defn- get-topic
-  [address]
-  (let [[_ _ _ topic] (re-matches url-re address)]
-    topic))
+(defn- parse
+  [url]
+  (let [[_ protocol hostname topic] (re-matches url-re url)]
+    {:url url
+     :protocol protocol
+     :hostname hostname
+     :topic topic}))
 
 (defn- send-on-socket
   [socket payload topic]
@@ -28,19 +31,24 @@
      (publisher (implicit-context) address))
   ([context address]
      (let [socket (zmq/pub-socket! context address)
-           topic (get-topic address)]
-       (if (empty? topic)
+           info (parse address)]
+       (if (nil? (:topic info))
          (fn [payload payload-topic]
            (send-on-socket socket payload payload-topic))
          (fn [payload]
-           (send-on-socket socket payload topic))))))
+           (send-on-socket socket payload (:topic info)))))))
 
 (defn subscription
-  [])
+  [url]
+  (let [info (parse url)
+        sub-socket (zmq/sub-socket! (implicit-context) (str (:protocol info) "://" (:hostname info)))]
+    (zmq/subscribe! sub-socket (:topic info))
+    sub-socket))
 
 (defn on-msg
-  [& args]
-  )
+  [socket & {do-f :do, while-f :while}]
+  {:pre [socket do-f while-f]}
+  nil)
 
 (defn context
   [& args])
