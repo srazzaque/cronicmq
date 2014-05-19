@@ -17,3 +17,5 @@
 (def recv! nil)
 
 (def close! nil)
+
+(def has-more? nil)

@@ -1,21 +1,22 @@
 (ns zeromq-clj.core
-  "The main namespace that user's should care about for the zeromq-clj library."
+  "Main namespace for zeromq-clj."
   (:require [clojure.tools.logging :refer :all]
             [zeromq-clj.zmq :as zmq]))
 
-(def ^:private ctx (atom nil))
+(def ^:dynamic *context* (delay (zmq/context!)))
 
-(defn- implicit-context
-  []
-  (or @ctx
-      (reset! ctx (zmq/context!))))
-
-;; TODO make it better and work for other protocols
 (def ^:private url-re #"^(tcp)://([^/]+)(/(.*))?$")
+
+(def ^:private open-sockets (atom {}))
+
+(defn- save-socket
+  [sck]
+  (swap! open-sockets update-in [@*context*] #(conj (or % []) sck))
+  sck)
 
 (defn- parse
   [url]
-  (let [[_ protocol hostname topic] (re-matches url-re url)]
+  (let [[_ protocol hostname _ topic] (re-matches url-re url)]
     {:url url
      :protocol protocol
      :hostname hostname
@@ -27,10 +28,10 @@
   (zmq/send! socket payload))
 
 (defn publisher
+  "Creates a publisher for the given url."
   ([address]
-     (publisher (implicit-context) address))
-  ([context address]
-     (let [socket (zmq/pub-socket! context address)
+     (let [context @*context*
+           socket (save-socket (zmq/pub-socket! context address))
            info (parse address)]
        (if (nil? (:topic info))
          (fn [payload payload-topic]
@@ -38,20 +39,25 @@
          (fn [payload]
            (send-on-socket socket payload (:topic info)))))))
 
+(defn- receive-from-socket
+  [sub-socket]
+  (let [topic (save-socket (zmq/recv! sub-socket))]
+    (if-not (and topic
+                 (zmq/has-more? sub-socket))
+      (throw (Exception. "No data received beyond topic header")))
+    (zmq/recv! sub-socket)))
+
 (defn subscription
+  "Opens a subscription to the given url. Returns a no-arg function that, when called, performs a blocking
+   call to receive a message from the socket."
   [url]
   (let [info (parse url)
-        sub-socket (zmq/sub-socket! (implicit-context) (str (:protocol info) "://" (:hostname info)))]
+        sub-socket (zmq/sub-socket! @*context* (str (:protocol info) "://" (:hostname info)))]
     (zmq/subscribe! sub-socket (:topic info))
-    sub-socket))
+    (fn []
+      (receive-from-socket sub-socket))))
 
-(defn on-msg
-  [socket & {do-f :do, while-f :while}]
-  {:pre [socket do-f while-f]}
-  nil)
-
-(defn context
-  [& args])
-
-(defn close
-  [& args])
+(defn close!
+  [& args]
+  (for [s (open-sockets @*context*)]
+    (zmq/close! s)))
