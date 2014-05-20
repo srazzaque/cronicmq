@@ -52,12 +52,15 @@
    call to receive a message from the socket."
   [url]
   (let [info (parse url)
-        sub-socket (zmq/sub-socket! @*context* (str (:protocol info) "://" (:hostname info)))]
+        subscription-url (str (:protocol info) "://" (:hostname info))
+        sub-socket (save-socket (zmq/sub-socket! @*context* subscription-url))]
     (zmq/subscribe! sub-socket (:topic info))
     (fn []
       (receive-from-socket sub-socket))))
 
 (defn close!
   [& args]
-  (for [s (open-sockets @*context*)]
-    (zmq/close! s)))
+  (doseq [s (@open-sockets @*context*)]
+    (zmq/close! s))
+  (zmq/close! @*context*)
+  (swap! open-sockets dissoc @*context*))

@@ -8,8 +8,6 @@
 
 (def socket-args (atom []))
 
-(def context-args (atom []))
-
 (def send-args (atom []))
 
 (def subscribe-args (atom []))
@@ -31,7 +29,7 @@
 
 (defn with-mocks
   [f]
-  (doseq [i [pub-socket-args socket-args context-args send-args subscribe-args send-more-args recv-args]]
+  (doseq [i [pub-socket-args socket-args send-args subscribe-args send-more-args recv-args]]
     (reset! i []))
   (with-redefs-fn {#'zmq/context! (constantly "mock-context")}
     f))
@@ -89,7 +87,8 @@
                        #'zmq/subscribe! (mock-fn subscribe-args)
                        #'zmq/has-more? (mock-fn has-more-args true)
                        #'zmq/recv! (fn [& _] (async/<!! channel))}
-        (fn []
+        (fn
+          []
           (let [s (subscription "tcp://foo.bar:1234/topicName")
                 first-msg (s)
                 second-msg (s)]
@@ -98,11 +97,16 @@
 
 (deftest cleanup
   (testing "calling close on the implicit context should close all sockets created via the implicit context"
-    (let [closed-items  (atom [])]
-      (with-redefs-fn {#'zmq/close! #(swap! closed-items conj %)}
+    (let [closed-items (atom [])]
+      (with-redefs-fn {#'zmq/close! (fn [x]
+                                      (swap! closed-items conj x))
+                       #'zmq/pub-socket! (constantly "publish-addr")
+                       #'zmq/sub-socket! (constantly "sub-addr")
+                       #'zmq/subscribe! (constantly nil)
+                       #'zmq/context! (constantly "mock-context")}
         (fn
           []
           (publisher "tcp://publish-addr:1234")
           (subscription "tcp://subscribe-address:1234")
           (close!)
-          (is (= ["mock-context" "publish-addr" "sub-addr"] @closed-items)))))))
+          (is (= ["publish-addr" "sub-addr" "mock-context"] @closed-items)))))))
