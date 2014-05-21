@@ -4,7 +4,7 @@
 (defn serialize
   "Given a java.io.Serializable thing, serialize it to a byte array."
   [data]
-  (let [buff (ByteArrayOutputStream. 1024)]
+  (let [buff (ByteArrayOutputStream.)]
     (with-open [dos (ObjectOutputStream. buff)]
       (.writeObject dos data))
     (.toByteArray buff)))
