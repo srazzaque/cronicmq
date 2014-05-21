@@ -110,3 +110,7 @@
           (subscription "tcp://subscribe-address:1234")
           (close!)
           (is (= ["publish-addr" "sub-addr" "mock-context"] @closed-items)))))))
+
+
+; TODO - publisher payload message and topics should be Serializable's, and should make use of serialization namespace
+; TODO - same with subscription topic
