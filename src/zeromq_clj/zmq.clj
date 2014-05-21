@@ -1,21 +1,44 @@
 (ns zeromq-clj.zmq
   "A thin wrapper around ZeroMQ. Don't use these functions directly - use what's exposed in core."
-  (:import (org.zeromq ZMQ)))
+  (:import (org.zeromq ZMQ ZMQ$Context ZMQ$Socket)
+           (java.io Closeable)))
 
-(def pub-socket! nil)
+(set! *warn-on-reflection* true)
 
-(def sub-socket! nil)
+(defn pub-socket!
+  [^ZMQ$Context context ^String url]
+  (doto (.socket context ZMQ/PUB)
+    (.bind url)))
 
-(def context! nil)
+(defn sub-socket!
+  [^ZMQ$Context context ^String url]
+  (doto (.socket context ZMQ/SUB)
+    (.connect url)))
 
-(def send! nil)
+(defn context!
+  []
+  (ZMQ/context 1))
 
-(def subscribe! nil)
+(defn send-more!
+  [^ZMQ$Socket socket ^bytes topic]
+  (.sendMore socket topic))
 
-(def send-more! nil)
+(defn send!
+  [^ZMQ$Socket socket ^bytes payload]
+  (.send socket payload))
 
-(def recv! nil)
+(defn subscribe!
+  [^ZMQ$Socket socket ^bytes topic]
+  (.subscribe socket topic))
 
-(def close! nil)
+(defn recv!
+  [^ZMQ$Socket socket]
+  (.recv socket))
 
-(def has-more? nil)
+(defn close!
+  [^Closeable x]
+  (.close x))
+
+(defn has-more?
+  [^ZMQ$Socket socket]
+  (.hasReceiveMore socket))
