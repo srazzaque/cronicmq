@@ -28,7 +28,9 @@
   (zmq/send! socket payload))
 
 (defn publisher
-  "Creates a publisher for the given url."
+  "Creates a publisher for the given url. Returns a function that can be used to publish a message.
+   If the publisher is a multi-topic publisher, the function returned accepts two arguments - [payload topic].
+   If the publisher is a single-topic publisher, the function return accepts one argument - [payload]."
   ([address]
      (let [context @*context*
            socket (save-socket (zmq/pub-socket! context address))
