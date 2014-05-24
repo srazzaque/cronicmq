@@ -1,9 +1,11 @@
 (ns zeromq-clj.serialization
   (:import (java.io ByteArrayOutputStream ObjectOutputStream ObjectInputStream ByteArrayInputStream)))
 
-(defn serialize
+(set! *warn-on-reflection* true)
+
+(defn ^bytes serialize
   "Given a java.io.Serializable thing, serialize it to a byte array."
-  [data]
+  [^java.io.Serializable data]
   (let [buff (ByteArrayOutputStream.)]
     (with-open [dos (ObjectOutputStream. buff)]
       (.writeObject dos data))
@@ -11,6 +13,6 @@
 
 (defn deserialize
   "Deserialize whatever is provided into a data structure"
-  [bytes]
+  [^bytes bytes]
   (with-open [dis (ObjectInputStream. (ByteArrayInputStream. bytes))]
     (.readObject dis)))

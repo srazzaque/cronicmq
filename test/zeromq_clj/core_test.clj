@@ -2,7 +2,10 @@
   (:require [clojure.test :refer :all]
             [zeromq-clj.core :refer :all]
             [zeromq-clj.zmq :as zmq]
+            [zeromq-clj.serialization :as ser]
             [clojure.core.async :as async]))
+
+(def context-args (atom []))
 
 (def pub-socket-args (atom []))
 
@@ -18,6 +21,10 @@
 
 (def has-more-args (atom []))
 
+(def serialize-args (atom []))
+
+(def deserialize-args (atom []))
+
 (defn mock-fn
   "Used to capture the value of the call to the mock function."
   ([arg]
@@ -27,17 +34,25 @@
        (reset! arg (vec args))
        return-val)))
 
-(defn with-mocks
-  [f]
-  (doseq [i [pub-socket-args socket-args send-args subscribe-args send-more-args recv-args]]
-    (reset! i []))
-  (with-redefs-fn {#'zmq/context! (constantly "mock-context")}
-    f))
+(defn mock-fn-echo
+  "Mock function with single arg, capture arg and echo what was passed in"
+  [arg]
+  (fn [incoming-arg]
+    (swap! arg conj incoming-arg)
+    incoming-arg))
 
-(use-fixtures :each with-mocks)
+(defn clear-args
+  [f]
+  (doseq [i [pub-socket-args socket-args send-args subscribe-args
+             send-more-args recv-args serialize-args deserialize-args
+             context-args]]
+    (reset! i []))
+  (f))
+
+(use-fixtures :each clear-args)
 
 (deftest test-publishing
-  (testing "create publisher with the implicit global context"
+  (testing "create publisher"
     (with-redefs-fn {#'zmq/pub-socket! (mock-fn pub-socket-args)}
       (fn []
         (is (function? (publisher "tcp://foo-bar-baz:1234")))
@@ -45,31 +60,39 @@
   (testing "send topic and payload on single-topic publisher"
     (with-redefs-fn {#'zmq/pub-socket! (mock-fn pub-socket-args "mock-socket")
                      #'zmq/send-more! (mock-fn send-more-args)
-                     #'zmq/send! (mock-fn send-args)}
+                     #'zmq/send! (mock-fn send-args)
+                     #'zmq/context! (mock-fn context-args "mock-context")
+                     #'ser/serialize (mock-fn-echo serialize-args)}
       #(let [p (publisher "tcp://some-url:1234/someTopic")]
          (is (not (nil? (p "payload"))))
          (is (= ["mock-socket" "someTopic"] @send-more-args))
-         (is (= ["mock-socket" "payload"] @send-args)))))
+         (is (= ["mock-socket" "payload"] @send-args))
+         (is (= ["someTopic" "payload"] @serialize-args))))))
+
+(deftest multi-topic-publishing
   (testing "send topic and payload on multi-topic publisher"
     (with-redefs-fn {#'zmq/pub-socket! (constantly "mock-socket")
                      #'zmq/send-more! (mock-fn send-more-args)
-                     #'zmq/send! (mock-fn send-args)}
+                     #'zmq/send! (mock-fn send-args)
+                     #'ser/serialize (mock-fn-echo serialize-args)}
       #(let [p (publisher "tcp://foo-bar-baz:1234")]
          (is (p "payload" "topic"))
          (is (= ["mock-socket" "topic"] @send-more-args))
-         (is (= ["mock-socket" "payload"] @send-args)))))
+         (is (= ["mock-socket" "payload"] @send-args))
+         (is (= ["topic" "payload"] @serialize-args)))))
   (testing "create multi-topic publisher and send payload without topic - should cause an error"
     (with-redefs-fn {#'zmq/pub-socket! (constantly "mock-socket")}
       #(let [p (publisher "tcp://foo-bar-baz:1234")]
          (is (thrown? clojure.lang.ArityException (p "payload")))))))
 
-
 (deftest test-subscription
-  (testing "create topic subscription with implicit context."
+  (testing "create subscription."
     (with-redefs-fn {#'zmq/sub-socket! (mock-fn socket-args)
-                     #'zmq/subscribe! (mock-fn subscribe-args)}
+                     #'zmq/subscribe! (mock-fn subscribe-args)
+                     #'ser/serialize (mock-fn-echo serialize-args)}
       (fn []
         (is (subscription "tcp://foo.bar:1234/topicName"))
+        (is (= ["topicName"] @serialize-args))
         (is (= ["mock-context" "tcp://foo.bar:1234"] @socket-args))
         (is (= ["mock-subscription" "topicName"]) @subscribe-args))))
   (testing "create all-topic subscription."
@@ -86,14 +109,16 @@
       (with-redefs-fn {#'zmq/sub-socket! (mock-fn socket-args)
                        #'zmq/subscribe! (mock-fn subscribe-args)
                        #'zmq/has-more? (mock-fn has-more-args true)
-                       #'zmq/recv! (fn [& _] (async/<!! channel))}
+                       #'zmq/recv! (fn [& _] (async/<!! channel))
+                       #'ser/deserialize (mock-fn-echo deserialize-args)}
         (fn
           []
           (let [s (subscription "tcp://foo.bar:1234/topicName")
                 first-msg (s)
                 second-msg (s)]
             (is (= first-msg "first"))
-            (is (= second-msg "second"))))))))
+            (is (= second-msg "second"))
+            (is (= ["first" "second"] @deserialize-args))))))))
 
 (deftest cleanup
   (testing "calling close on the implicit context should close all sockets created via the implicit context"
@@ -111,6 +136,3 @@
           (close!)
           (is (= ["publish-addr" "sub-addr" "mock-context"] @closed-items)))))))
 
-
-; TODO - publisher payload message and topics should be Serializable's, and should make use of serialization namespace
-; TODO - same with subscription topic

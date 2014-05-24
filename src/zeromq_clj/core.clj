@@ -1,7 +1,8 @@
 (ns zeromq-clj.core
   "Main namespace for zeromq-clj."
   (:require [clojure.tools.logging :refer :all]
-            [zeromq-clj.zmq :as zmq]))
+            [zeromq-clj.zmq :as zmq]
+            [zeromq-clj.serialization :as s]))
 
 (def ^:dynamic *context* (delay (zmq/context!)))
 
@@ -23,9 +24,9 @@
      :topic topic}))
 
 (defn- send-on-socket
-  [socket payload topic]
-  (zmq/send-more! socket topic)
-  (zmq/send! socket payload))
+  [socket ^java.io.Serializable payload ^java.io.Serializable topic]
+  (zmq/send-more! socket (s/serialize topic))
+  (zmq/send! socket (s/serialize payload)))
 
 (defn publisher
   "Creates a publisher for the given url. Returns a function that can be used to publish a message.
@@ -36,18 +37,18 @@
            socket (save-socket (zmq/pub-socket! context address))
            info (parse address)]
        (if (nil? (:topic info))
-         (fn [payload payload-topic]
+         (fn [^java.io.Serializable payload ^java.io.Serializable payload-topic]
            (send-on-socket socket payload payload-topic))
-         (fn [payload]
+         (fn [^java.io.Serializable payload]
            (send-on-socket socket payload (:topic info)))))))
 
 (defn- receive-from-socket
   [sub-socket]
-  (let [topic (save-socket (zmq/recv! sub-socket))]
+  (let [topic (zmq/recv! sub-socket)]
     (if-not (and topic
                  (zmq/has-more? sub-socket))
-      (throw (Exception. "No data received beyond topic header")))
-    (zmq/recv! sub-socket)))
+      (throw (Exception. (str "No data received beyond topic header: " topic))))
+    (s/deserialize (zmq/recv! sub-socket))))
 
 (defn subscription
   "Opens a subscription to the given url. Returns a no-arg function that, when called, performs a blocking
@@ -56,7 +57,7 @@
   (let [info (parse url)
         subscription-url (str (:protocol info) "://" (:hostname info))
         sub-socket (save-socket (zmq/sub-socket! @*context* subscription-url))]
-    (zmq/subscribe! sub-socket (:topic info))
+    (zmq/subscribe! sub-socket (s/serialize (:topic info)))
     (fn []
       (receive-from-socket sub-socket))))
 
