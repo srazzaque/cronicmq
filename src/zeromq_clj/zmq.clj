@@ -9,11 +9,13 @@
 
 (defn pub-socket!
   [^ZMQ$Context context ^String url]
-  (let [socket (.socket context ZMQ/PUB)]
-    (when (= ZMQ_ERR_CODE (.bind socket url))
-      (throw (ex-info (str "Failed to bind publisher socket to url " url) {:context context
-                                                                            :url url
-                                                                            :socket socket})))
+  (let [socket (.socket context ZMQ/PUB)
+        bind-result (.bind socket url)]
+    (when (= ZMQ_ERR_CODE bind-result)
+      (throw (ex-info (str "Failed to bind publisher socket to url " url)
+                      {:context context
+                       :url url
+                       :socket socket})))
     socket))
 
 (defn sub-socket!

@@ -113,6 +113,9 @@
   (remove-socket sock-fn))
 
 (defn close!
+  "Closes the socket associated with a given socket function (created via 'publisher' or
+   'subscription'). If passed an argument of :all, closes all open sockets associated with the
+   global implicit context"
   [arg]
   (if (= arg :all)
     (close-all)
