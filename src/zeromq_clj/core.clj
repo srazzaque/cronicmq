@@ -59,8 +59,8 @@
    If the publisher is a single-topic publisher, the function return accepts one argument - [payload]."
   ([address]
      (let [context (context)
-           socket (zmq/pub-socket! context address)
            info (parse address)
+           socket (zmq/pub-socket! context (str (:protocol info) "://" (:hostname info)))
            publisher-fn (if (nil? (:topic info))
                           (fn [^java.io.Serializable payload ^java.io.Serializable payload-topic]
                             (send-on-socket socket payload payload-topic))

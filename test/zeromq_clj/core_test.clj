@@ -49,7 +49,7 @@
     (reset! i []))
   (binding [*context* (atom nil)]
     (with-redefs-fn {#'zmq/context! (mock-fn context-args "mock-context")
-                     #'zmq/pub-socket! (mock-fn pub-socket-args"mock-publisher")
+                     #'zmq/pub-socket! (mock-fn pub-socket-args "mock-publisher")
                      #'zmq/sub-socket! (mock-fn socket-args "mock-subscription")
                      #'zmq/subscribe! (mock-fn subscribe-args "you-subscribed!")
                      #'zmq/close! (constantly "closed.")
@@ -64,13 +64,24 @@
 (deftest test-publishing
   (testing "create publisher"
     (is (function? (publisher "tcp://foo-bar-baz:1234")))
-    (is (= ["mock-context" "tcp://foo-bar-baz:1234"] @pub-socket-args)))
+    (is (= ["mock-context" "tcp://foo-bar-baz:1234"] @pub-socket-args))))
+
+(deftest test-publishing-single-topic
   (testing "send topic and payload on single-topic publisher"
     (let [p (publisher "tcp://some-url:1234/someTopic")]
       (is (not (nil? (p "payload"))))
+      (is (= ["mock-context" "tcp://some-url:1234"] @pub-socket-args))
       (is (= ["mock-publisher" "someTopic"] @send-more-args))
       (is (= ["mock-publisher" "payload"] @send-args))
       (is (= ["someTopic" "payload"] @serialize-args)))))
+
+(deftest test-publishing-bind-failure
+  (testing "creating a publisher that fails to bind should raise an exception."
+    (with-redefs-fn {#'zmq/pub-socket! (fn [& args]
+                                         (throw (Exception. "Surprise!")))}
+      (fn
+        []
+        (is (thrown? java.lang.Exception (publisher "tcp://foo-bar-baz:1234")))))))
 
 (deftest multi-topic-publishing
   (testing "send topic and payload on multi-topic publisher"

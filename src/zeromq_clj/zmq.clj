@@ -7,8 +7,11 @@
 
 (defn pub-socket!
   [^ZMQ$Context context ^String url]
-  (doto (.socket context ZMQ/PUB)
-    (.bind url)))
+  (let [socket (.socket context ZMQ/PUB)]
+    (if (not (= 0 (.bind socket url)))
+      (throw (ex-info (str "Failed to bind publisher socket to url " url) {:context context
+                                                                            :url url
+                                                                            :socket socket})))))
 
 (defn sub-socket!
   [^ZMQ$Context context ^String url]
