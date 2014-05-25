@@ -41,78 +41,64 @@
     (swap! arg conj incoming-arg)
     incoming-arg))
 
-(defn clear-args
+(defn with-mock-functions
   [f]
   (doseq [i [pub-socket-args socket-args send-args subscribe-args
              send-more-args recv-args serialize-args deserialize-args
              context-args]]
     (reset! i []))
   (binding [*context* (atom nil)]
-    (with-redefs-fn {#'zmq/context! (constantly "mock-context")}
+    (with-redefs-fn {#'zmq/context! (mock-fn context-args "mock-context")
+                     #'zmq/pub-socket! (mock-fn pub-socket-args"mock-publisher")
+                     #'zmq/sub-socket! (mock-fn socket-args "mock-subscription")
+                     #'zmq/subscribe! (mock-fn subscribe-args "you-subscribed!")
+                     #'zmq/close! (constantly "closed.")
+                     #'zmq/send-more! (mock-fn send-more-args)
+                     #'zmq/send! (mock-fn send-args)
+                     #'ser/serialize (mock-fn-echo serialize-args)
+                     #'ser/deserialize (mock-fn-echo deserialize-args)}
       f)))
 
-(use-fixtures :each clear-args)
+(use-fixtures :each with-mock-functions)
 
 (deftest test-publishing
   (testing "create publisher"
-    (with-redefs-fn {#'zmq/pub-socket! (mock-fn pub-socket-args)}
-      (fn []
-        (is (function? (publisher "tcp://foo-bar-baz:1234")))
-        (is (= ["mock-context" "tcp://foo-bar-baz:1234"] @pub-socket-args)))))
+    (is (function? (publisher "tcp://foo-bar-baz:1234")))
+    (is (= ["mock-context" "tcp://foo-bar-baz:1234"] @pub-socket-args)))
   (testing "send topic and payload on single-topic publisher"
-    (with-redefs-fn {#'zmq/pub-socket! (mock-fn pub-socket-args "mock-socket")
-                     #'zmq/send-more! (mock-fn send-more-args)
-                     #'zmq/send! (mock-fn send-args)
-                     #'zmq/context! (mock-fn context-args "mock-context")
-                     #'ser/serialize (mock-fn-echo serialize-args)}
-      #(let [p (publisher "tcp://some-url:1234/someTopic")]
-         (is (not (nil? (p "payload"))))
-         (is (= ["mock-socket" "someTopic"] @send-more-args))
-         (is (= ["mock-socket" "payload"] @send-args))
-         (is (= ["someTopic" "payload"] @serialize-args))))))
+    (let [p (publisher "tcp://some-url:1234/someTopic")]
+      (is (not (nil? (p "payload"))))
+      (is (= ["mock-publisher" "someTopic"] @send-more-args))
+      (is (= ["mock-publisher" "payload"] @send-args))
+      (is (= ["someTopic" "payload"] @serialize-args)))))
 
 (deftest multi-topic-publishing
   (testing "send topic and payload on multi-topic publisher"
-    (with-redefs-fn {#'zmq/pub-socket! (constantly "mock-socket")
-                     #'zmq/send-more! (mock-fn send-more-args)
-                     #'zmq/send! (mock-fn send-args)
-                     #'ser/serialize (mock-fn-echo serialize-args)}
-      #(let [p (publisher "tcp://foo-bar-baz:1234")]
-         (is (p "payload" "topic"))
-         (is (= ["mock-socket" "topic"] @send-more-args))
-         (is (= ["mock-socket" "payload"] @send-args))
-         (is (= ["topic" "payload"] @serialize-args)))))
+    (let [p (publisher "tcp://foo-bar-baz:1234")]
+      (is (p "payload" "topic"))
+      (is (= ["mock-publisher" "topic"] @send-more-args))
+      (is (= ["mock-publisher" "payload"] @send-args))
+      (is (= ["topic" "payload"] @serialize-args))))
   (testing "create multi-topic publisher and send payload without topic - should cause an error"
-    (with-redefs-fn {#'zmq/pub-socket! (constantly "mock-socket")}
-      #(let [p (publisher "tcp://foo-bar-baz:1234")]
-         (is (thrown? clojure.lang.ArityException (p "payload")))))))
+    (let [p (publisher "tcp://foo-bar-baz:1234")]
+      (is (thrown? clojure.lang.ArityException (p "payload"))))))
 
 (deftest test-subscription
   (testing "create subscription."
-    (with-redefs-fn {#'zmq/sub-socket! (mock-fn socket-args)
-                     #'zmq/subscribe! (mock-fn subscribe-args)
-                     #'ser/serialize (mock-fn-echo serialize-args)}
-      (fn []
-        (is (subscription "tcp://foo.bar:1234/topicName"))
-        (is (= ["topicName"] @serialize-args))
-        (is (= ["mock-context" "tcp://foo.bar:1234"] @socket-args))
-        (is (= ["mock-subscription" "topicName"]) @subscribe-args))))
+    (is (subscription "tcp://foo.bar:1234/topicName"))
+    (is (= ["topicName"] @serialize-args))
+    (is (= ["mock-context" "tcp://foo.bar:1234"] @socket-args))
+    (is (= ["mock-subscription" "topicName"]) @subscribe-args))
   (testing "create all-topic subscription."
-    (with-redefs-fn {#'zmq/sub-socket! (mock-fn socket-args)
-                     #'zmq/subscribe! (mock-fn subscribe-args)}
-      (fn []
-        (is (subscription "tcp://foo.bar:1234/*"))
-        (is (= ["mock-context" "tcp://foo.bar:1234"] @socket-args))
-        (is (= ["mock-subscription" ""]) @subscribe-args)))))
+    (is (subscription "tcp://foo.bar:1234/*"))
+    (is (= ["mock-context" "tcp://foo.bar:1234"] @socket-args))
+    (is (= ["mock-subscription" ""]) @subscribe-args)))
 
 (deftest test-pulling-messages-from-subscription
   (testing "should be able to pull messages off the subscription"
     (let [channel (async/to-chan ["topic" "first" "topic" "second"])]
-      (with-redefs-fn {#'zmq/sub-socket! (mock-fn socket-args)
-                       #'zmq/subscribe! (mock-fn subscribe-args)
-                       #'zmq/has-more? (mock-fn has-more-args true)
-                       #'zmq/recv! (fn [& _] (async/<!! channel))
-                       #'ser/deserialize (mock-fn-echo deserialize-args)}
+      (with-redefs-fn {#'zmq/has-more? (mock-fn has-more-args true)
+                       #'zmq/recv! (fn [& _] (async/<!! channel))}
         (fn
           []
           (let [s (subscription "tcp://foo.bar:1234/topicName")
@@ -126,24 +112,20 @@
   (testing "calling close on the implicit context should close all sockets created via the implicit context"
     (let [closed-items (atom [])]
       (with-redefs-fn {#'zmq/close! (fn [x]
-                                      (swap! closed-items conj x))
-                       #'zmq/pub-socket! (constantly "publish-addr")
-                       #'zmq/sub-socket! (constantly "sub-addr")
-                       #'zmq/subscribe! (constantly nil)}
+                                      (swap! closed-items conj x))}
         (fn
           []
           (publisher "tcp://publish-addr:1234")
           (subscription "tcp://subscribe-address:1234")
           (close! :all)
-          (is (= ["publish-addr" "sub-addr" "mock-context"] @closed-items)))))))
+          (is (= #{"mock-publisher" "mock-subscription" "mock-context"} (set @closed-items))))))))
 
 (deftest cleanup-specific-items
   (testing "clean up a specific publisher"
     (let [closed-items (atom [])]
       (with-redefs-fn {#'zmq/close! (fn
                                       [x]
-                                      (swap! closed-items conj x))
-                       #'zmq/pub-socket! (constantly "mock-publisher")}
+                                      (swap! closed-items conj x))}
         (fn
           []
           (let [p (publisher "tcp://hello:1234")]
@@ -153,9 +135,7 @@
     (let [closed-items (atom [])]
       (with-redefs-fn {#'zmq/close! (fn
                                       [x]
-                                      (swap! closed-items conj x))
-                       #'zmq/subscribe! (constantly nil)
-                       #'zmq/sub-socket! (constantly "mock-subscription")}
+                                      (swap! closed-items conj x))}
         (fn
           []
           (let [s (subscription "tcp://hello:1234")]
@@ -165,11 +145,7 @@
 (deftest cleanup-all-and-continue-working
   (testing "cleaning up :all and then creating a publisher or subscription should create a new context"
     (let [created-contexts (atom 0)]
-      (with-redefs-fn {#'zmq/sub-socket! (constantly "sub")
-                       #'zmq/pub-socket! (constantly "pub")
-                       #'zmq/subscribe! (constantly nil)
-                       #'zmq/close! (constantly "closed.")
-                       #'zmq/context! (fn
+      (with-redefs-fn {#'zmq/context! (fn
                                         []
                                         (swap! created-contexts inc)
                                         (str "mock-context-" @created-contexts))}
