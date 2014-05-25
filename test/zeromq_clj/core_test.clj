@@ -47,7 +47,9 @@
              send-more-args recv-args serialize-args deserialize-args
              context-args]]
     (reset! i []))
-  (f))
+  (binding [*context* (atom nil)]
+    (with-redefs-fn {#'zmq/context! (constantly "mock-context")}
+      f)))
 
 (use-fixtures :each clear-args)
 
@@ -127,12 +129,56 @@
                                       (swap! closed-items conj x))
                        #'zmq/pub-socket! (constantly "publish-addr")
                        #'zmq/sub-socket! (constantly "sub-addr")
-                       #'zmq/subscribe! (constantly nil)
-                       #'zmq/context! (constantly "mock-context")}
+                       #'zmq/subscribe! (constantly nil)}
         (fn
           []
           (publisher "tcp://publish-addr:1234")
           (subscription "tcp://subscribe-address:1234")
-          (close!)
+          (close! :all)
           (is (= ["publish-addr" "sub-addr" "mock-context"] @closed-items)))))))
 
+(deftest cleanup-specific-items
+  (testing "clean up a specific publisher"
+    (let [closed-items (atom [])]
+      (with-redefs-fn {#'zmq/close! (fn
+                                      [x]
+                                      (swap! closed-items conj x))
+                       #'zmq/pub-socket! (constantly "mock-publisher")}
+        (fn
+          []
+          (let [p (publisher "tcp://hello:1234")]
+            (close! p)
+            (is (= ["mock-publisher"] @closed-items)))))))
+  (testing "clean up a specific subscription"
+    (let [closed-items (atom [])]
+      (with-redefs-fn {#'zmq/close! (fn
+                                      [x]
+                                      (swap! closed-items conj x))
+                       #'zmq/subscribe! (constantly nil)
+                       #'zmq/sub-socket! (constantly "mock-subscription")}
+        (fn
+          []
+          (let [s (subscription "tcp://hello:1234")]
+            (close! s)
+            (is (= ["mock-subscription"] @closed-items))))))))
+
+(deftest cleanup-all-and-continue-working
+  (testing "cleaning up :all and then creating a publisher or subscription should create a new context"
+    (let [created-contexts (atom 0)]
+      (with-redefs-fn {#'zmq/sub-socket! (constantly "sub")
+                       #'zmq/pub-socket! (constantly "pub")
+                       #'zmq/subscribe! (constantly nil)
+                       #'zmq/close! (constantly "closed.")
+                       #'zmq/context! (fn
+                                        []
+                                        (swap! created-contexts inc)
+                                        (str "mock-context-" @created-contexts))}
+        (fn
+          []
+          (subscription "tcp://helloworld:1234/abc")
+          (publisher "tcp://helloworld:1234/abc")
+          (is (= 1 @created-contexts))
+          (close! :all)
+          (subscription "tcp://helloworld:1234/abc")
+          (publisher "tcp://helloworld:1234/abc")
+          (is (= 2 @created-contexts)))))))

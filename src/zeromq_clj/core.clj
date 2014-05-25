@@ -4,7 +4,13 @@
             [zeromq-clj.zmq :as zmq]
             [zeromq-clj.serialization :as s]))
 
-(def ^:dynamic *context* (delay (zmq/context!)))
+(def ^:dynamic *context* (atom nil))
+
+(defn- context
+  []
+  (or
+   @*context*
+   (reset! *context* (zmq/context!))))
 
 (def ^:private url-re #"^(tcp)://([^/]+)(/(.*))?$")
 
@@ -12,7 +18,7 @@
 
 (defn- save-socket
   [sck]
-  (swap! open-sockets update-in [@*context*] #(conj (or % []) sck))
+  (swap! open-sockets update-in [(context)] #(conj (or % []) sck))
   sck)
 
 (defn- parse
@@ -33,14 +39,15 @@
    If the publisher is a multi-topic publisher, the function returned accepts two arguments - [payload topic].
    If the publisher is a single-topic publisher, the function return accepts one argument - [payload]."
   ([address]
-     (let [context @*context*
+     (let [context (context)
            socket (save-socket (zmq/pub-socket! context address))
-           info (parse address)]
-       (if (nil? (:topic info))
-         (fn [^java.io.Serializable payload ^java.io.Serializable payload-topic]
-           (send-on-socket socket payload payload-topic))
-         (fn [^java.io.Serializable payload]
-           (send-on-socket socket payload (:topic info)))))))
+           info (parse address)
+           publisher-fn (if (nil? (:topic info))
+                          (fn [^java.io.Serializable payload ^java.io.Serializable payload-topic]
+                            (send-on-socket socket payload payload-topic))
+                          (fn [^java.io.Serializable payload]
+                            (send-on-socket socket payload (:topic info))))]
+       (with-meta publisher-fn {:socket socket}))))
 
 (defn- receive-from-socket
   [sub-socket]
@@ -56,14 +63,30 @@
   [url]
   (let [info (parse url)
         subscription-url (str (:protocol info) "://" (:hostname info))
-        sub-socket (save-socket (zmq/sub-socket! @*context* subscription-url))]
+        sub-socket (save-socket (zmq/sub-socket! (context) subscription-url))
+        subscription-fn (fn []
+                          (receive-from-socket sub-socket))]
     (zmq/subscribe! sub-socket (s/serialize (:topic info)))
-    (fn []
-      (receive-from-socket sub-socket))))
+    (with-meta subscription-fn {:socket sub-socket})))
+
+(defn- close-all
+  []
+  (let [ctx (context)]
+    (doseq [s (@open-sockets ctx)]
+      (zmq/close! s))
+    (zmq/close! ctx)
+    (swap! open-sockets dissoc ctx)
+    (reset! *context* nil)))
+
+(defn- close-single-socket
+  [sock-fn]
+  (let [sck (:socket (meta sock-fn))]
+    (when (not sck)
+      (throw (Exception. "Passed in socket fn did not have any metadata indicating which socket to close.")))
+    (zmq/close! sck)))
 
 (defn close!
-  [& args]
-  (doseq [s (@open-sockets @*context*)]
-    (zmq/close! s))
-  (zmq/close! @*context*)
-  (swap! open-sockets dissoc @*context*))
+  [arg]
+  (if (= arg :all)
+    (close-all)
+    (close-single-socket arg)))
