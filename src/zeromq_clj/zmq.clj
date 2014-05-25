@@ -3,15 +3,18 @@
   (:import (org.zeromq ZMQ ZMQ$Context ZMQ$Socket)
            (java.io Closeable)))
 
+(def ^:private ZMQ_ERR_CODE -1)
+
 (set! *warn-on-reflection* true)
 
 (defn pub-socket!
   [^ZMQ$Context context ^String url]
   (let [socket (.socket context ZMQ/PUB)]
-    (if (not (= 0 (.bind socket url)))
+    (when (= ZMQ_ERR_CODE (.bind socket url))
       (throw (ex-info (str "Failed to bind publisher socket to url " url) {:context context
                                                                             :url url
-                                                                            :socket socket})))))
+                                                                            :socket socket})))
+    socket))
 
 (defn sub-socket!
   [^ZMQ$Context context ^String url]
