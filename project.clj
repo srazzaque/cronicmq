@@ -1,6 +1,6 @@
-(defproject io.cronic/zeromq-clj "0.1.3-SNAPSHOT"
+(defproject io.cronic/cronicmq "0.1.3-SNAPSHOT"
   :description "Clojure-friendly access to ZeroMQ (using the JeroMQ implementation)"
-  :url "http://cronic.io/zeromq-clj"
+  :url "http://cronic.io/cronicmq"
   :license {:name "Eclipse Public License"
             :url "http://www.eclipse.org/legal/epl-v10.html"}
   :dependencies [[org.clojure/clojure "1.5.1"]

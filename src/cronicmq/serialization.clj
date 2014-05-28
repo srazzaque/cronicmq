@@ -1,4 +1,4 @@
-(ns zeromq-clj.serialization
+(ns cronicmq.serialization
   (:import (java.io ByteArrayOutputStream ObjectOutputStream ObjectInputStream ByteArrayInputStream)))
 
 (set! *warn-on-reflection* true)

@@ -1,4 +1,4 @@
-(ns zeromq-clj.zmq
+(ns cronicmq.zmq
   "A thin wrapper around ZeroMQ. Don't use these functions directly - use what's exposed in core."
   (:import (org.zeromq ZMQ ZMQ$Context ZMQ$Socket)
            (java.io Closeable)))

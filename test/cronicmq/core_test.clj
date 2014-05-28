@@ -1,8 +1,8 @@
-(ns zeromq-clj.core-test
+(ns cronicmq.core-test
   (:require [clojure.test :refer :all]
-            [zeromq-clj.core :refer :all]
-            [zeromq-clj.zmq :as zmq]
-            [zeromq-clj.serialization :as ser]
+            [cronicmq.core :refer :all]
+            [cronicmq.zmq :as zmq]
+            [cronicmq.serialization :as ser]
             [clojure.core.async :as async]))
 
 (def context-args (atom []))

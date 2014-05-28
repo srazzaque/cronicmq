@@ -1,8 +1,8 @@
-(ns zeromq-clj.core
+(ns cronicmq.core
   "Main namespace for zeromq-clj."
   (:require [clojure.tools.logging :refer :all]
-            [zeromq-clj.zmq :as zmq]
-            [zeromq-clj.serialization :as s]))
+            [cronicmq.zmq :as zmq]
+            [cronicmq.serialization :as s]))
 
 (def ^:dynamic *context* (atom nil))
 
